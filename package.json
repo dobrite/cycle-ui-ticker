@@ -1,0 +1,19 @@
+{
+  "name": "inc-game",
+  "version": "0.0.1",
+  "main": "src/tester.js",
+  "author": "Dave O",
+  "dependencies": {
+    "cyclejs": "git://github.com/dobrite/cycle.git#do/rx_head",
+    "lodash": "2.4.1"
+  },
+  "devDependencies": {
+    "6to5": "^2.6.3",
+    "6to5-loader": "^1.0.0",
+    "css-loader": "~0.9.0",
+    "webpack": "~1.4.11"
+  },
+  "scripts": {
+    "start": "webpack --watch --colors --progress"
+  }
+}
