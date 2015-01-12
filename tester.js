@@ -6,26 +6,31 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
   var TickerModel = Cycle.createModel(function (attributes, intent) {
     return {
       ticker$: attributes.get('ticker$'),
-      out$: attributes.get('ticker$').map(function () {
-        return 1;
-      }),
-      num$: attributes.get('num$'),
-      highlighted$: attributes.get('highlight$'),
+      out$: attributes.get('ticker$').map(function () { return 1; }),
+      // num$ not necessary, I guess, if its purpose was for highlighting
+      highlighted$: Rx.Observable // from internal intent, not from attributes
+        .merge(
+          intent.get('startHighlight$').map(function () { return true; }),
+          intent.get('stopHighlight$').map(function () { return false; })
+        )
+        .startWith(false)
     };
   });
 
   var TickerView = Cycle.createView(function (model) {
     return {
-      vtree$: model.get('ticker$').withLatestFrom(model.get('num$'), model.get('highlighted$'),
-        function (ticker, num, highlighted) {
+      // Use combineLatest when you are confident that the combined observables
+      // are completely independent to each other. use withLatestFrom when you
+      // know one of the observables is derived from the other.
+      vtree$: model.get('ticker$').combineLatest(model.get('highlighted$'),
+        function (ticker, highlighted) {
           var color = (highlighted) ? 'red' : 'black';
           return h('div.ticker', [
             h('div', {
-              attributes: {
-                'data-num': num,
-                style: "color: " + color + ";",
-              },
-              onmouseover: 'mouseover$',
+              style: {color: color}, // style doesn't need to be inside attributes
+              onmouseenter: 'mouseenter$',
+              onmouseleave: 'mouseleave$',
+              // we use these two events to implement hover behavior
             }, String(ticker))
           ]);
         }
@@ -35,9 +40,10 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
 
   var TickerIntent = Cycle.createIntent(function (view) {
     return {
-      highlight$: view.get('mouseover$').map(function (e) {
-        return e.target.dataset.num;
-      })
+      startHighlight$: view.get('mouseenter$'),
+      stopHighlight$: view.get('mouseleave$')
+      // name intent events in such a way that they mean some user intention.
+      // Here, we interpret mouse entering as "the user wants to start highlighting", etc.
     };
   });
 
@@ -47,27 +53,23 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
 
   return {
     vtree$: TickerView.get('vtree$'),
-    highlight$: TickerIntent.get('highlight$'),
-    out$: TickerModel.get('out$'),
+    out$: TickerModel.get('out$')
   };
 });
 
 var Initial = Cycle.createDataFlowSource({
-  initial$: Rx.Observable.just({
-    highlight: 0,
-    total: 0,
-  }),
+  initial$: Rx.Observable.just({total: 0}),
 });
 
 var Model = Cycle.createModel(function (intent, initial) {
-  var highlight$ = intent.get('highlight$').map(function (i) {
-    return function (state) {
-      state.highlight = i;
-      return state;
-    }
-  });
+  // I removed highlighting state from here, it wasn't clear why did it have to
+  // leak out from the custom element ticker. Maybe you need it for game logic,
+  // but I think its natural to assume highlighting logic should be handled
+  // internally by the ticker.
 
-  var total$ = intent.get('out$').map(function (val) {
+  // Since this is an observable emitting functions, rather name it as something
+  // like fn$, because total$ suggests it is an observable of numbers
+  var setTotalFn$ = intent.get('out$').map(function (val) {
     return function (state) {
       state.total += val;
       return state;
@@ -77,31 +79,25 @@ var Model = Cycle.createModel(function (intent, initial) {
   return {
     ticker$: Rx.Observable.interval(1000).startWith(0),
     state$: Rx.Observable
-      .merge(total$, highlight$)
+      .merge(setTotalFn$)
       .merge(initial.get('initial$'))
       .scan(function (state, f) {
         return f(state);
       })
-      .publish()
-      .refCount()
+      // publish refCount not needed. I think actually all exported observables
+      // from DataFlowNodes are already hot observables because they are all
+      // backed by Subjects.
   };
 });
 
 var View = Cycle.createView(function (model) {
   return {
-    // model.get('ticker$').withLatestFrom(model.get('state$'), function (ticker, state) {
     vtree$: model.get('ticker$').withLatestFrom(model.get('state$'), function (ticker, state) {
       return h('div#the-view', ["Total: " + String(state.total),
         [0, 1, 2, 3, 4].map(function (i) {
-          return h('ticker', {
-            attributes: {
-              ticker: ticker,
-              num: i,
-              highlight: i === parseInt(state.highlight, 10),
-            },
-            onhighlight: 'highlight$',
-            onout: 'out$',
-          });
+          return h('ticker', {attributes: {ticker: ticker}, onout: 'out$'});
+          // num and highlight not needed anymore here since highlighting is
+          // handled internally.
         })
       ]);
     })
@@ -110,8 +106,7 @@ var View = Cycle.createView(function (model) {
 
 var Intent = Cycle.createIntent(function (view) {
   return {
-    highlight$: view.get('highlight$'),
-    out$: view.get('out$'),
+    out$: view.get('out$')
   };
 });
 
