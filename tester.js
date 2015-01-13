@@ -27,14 +27,16 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
           var border = (selected) ? '1px solid black' : null;
           return h('div.ticker', [
             h('div', {
-              attributes: { 'data-num': num },
+              attributes: {
+                'data-num': num
+              },
               style: {
                 color: color,
                 border: border
               },
               onmouseenter: 'mouseenter$',
               onmouseleave: 'mouseleave$',
-              onclick: 'selected$',
+              onclick: 'tickerClick$',
             }, String(ticker))
           ]);
         }
@@ -44,7 +46,6 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
 
   var TickerIntent = Cycle.createIntent(function (view) {
     return {
-      setSelected$: view.get('selected$').map(function (e) { return e.target.dataset.num; }),
       startHighlight$: view.get('mouseenter$'),
       stopHighlight$: view.get('mouseleave$')
     };
@@ -56,7 +57,7 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
 
   return {
     vtree$: TickerView.get('vtree$'),
-    selected$: TickerIntent.get('setSelected$'),
+    click$: TickerView.get('tickerClick$'),
     out$: TickerModel.get('out$')
   };
 });
@@ -96,7 +97,7 @@ var View = Cycle.createView(function (model) {
     vtree$: model.get('ticker$').withLatestFrom(model.get('state$'),
       function (ticker, state) {
         return h('div#the-view', [
-          "Total: " + String(state.total),
+          "Total: " + state.total,
           [0, 1, 2, 3, 4].map(function (i) {
             return h('ticker', {
               attributes: {
@@ -104,7 +105,7 @@ var View = Cycle.createView(function (model) {
                 num: i,
                 selected: i === parseInt(state.selected, 10),
               },
-              onselected: 'selected$',
+              onclick: 'tickerClick$',
               onout: 'out$',
             });
           }),
@@ -115,7 +116,7 @@ var View = Cycle.createView(function (model) {
 
 var Intent = Cycle.createIntent(function (view) {
   return {
-    selectTicker$: view.get('selected$'),
+    selectTicker$: view.get('tickerClick$').map(function (e) { return e.target.dataset.num; }),
     out$: view.get('out$'),
   };
 });
