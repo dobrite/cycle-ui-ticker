@@ -6,26 +6,35 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
   var TickerModel = Cycle.createModel(function (attributes, intent) {
     return {
       ticker$: attributes.get('ticker$'),
-      out$: attributes.get('ticker$').map(function () {
-        return 1;
-      }),
-      num$: attributes.get('num$'),
-      highlighted$: attributes.get('highlight$'),
+      out$: attributes.get('ticker$').map(function () { return 1; }),
+      highlighted$: Rx.Observable
+        .merge(
+          intent.get('startHighlight$').map(function () { return true; }),
+          intent.get('stopHighlight$').map(function () { return false; })
+        )
+        .startWith(false)
     };
   });
 
   var TickerView = Cycle.createView(function (model) {
     return {
-      vtree$: model.get('ticker$').withLatestFrom(model.get('num$'), model.get('highlighted$'),
-        function (ticker, num, highlighted) {
+      vtree$: model.get('ticker$').combineLatest(
+        attributes.get('num$'),
+        attributes.get('selected$'),
+        model.get('highlighted$'),
+        function (ticker, num, selected, highlighted) {
           var color = (highlighted) ? 'red' : 'black';
+          var border = (selected) ? '1px solid black' : null;
           return h('div.ticker', [
             h('div', {
-              attributes: {
-                'data-num': num,
-                style: "color: " + color + ";",
+              attributes: { 'data-num': num },
+              style: {
+                color: color,
+                border: border
               },
-              onmouseover: 'mouseover$',
+              onmouseenter: 'mouseenter$',
+              onmouseleave: 'mouseleave$',
+              onclick: 'selected$',
             }, String(ticker))
           ]);
         }
@@ -35,9 +44,9 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
 
   var TickerIntent = Cycle.createIntent(function (view) {
     return {
-      highlight$: view.get('mouseover$').map(function (e) {
-        return e.target.dataset.num;
-      })
+      setSelected$: view.get('selected$').map(function (e) { return e.target.dataset.num; }),
+      startHighlight$: view.get('mouseenter$'),
+      stopHighlight$: view.get('mouseleave$')
     };
   });
 
@@ -47,27 +56,24 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
 
   return {
     vtree$: TickerView.get('vtree$'),
-    highlight$: TickerIntent.get('highlight$'),
-    out$: TickerModel.get('out$'),
+    selected$: TickerIntent.get('setSelected$'),
+    out$: TickerModel.get('out$')
   };
 });
 
 var Initial = Cycle.createDataFlowSource({
-  initial$: Rx.Observable.just({
-    highlight: 0,
-    total: 0,
-  }),
+  initial$: Rx.Observable.just({ selected: 0, total: 0, }),
 });
 
 var Model = Cycle.createModel(function (intent, initial) {
-  var highlight$ = intent.get('highlight$').map(function (i) {
+  var setSelectedFn$ = intent.get('selectTicker$').map(function (num) {
     return function (state) {
-      state.highlight = i;
+      state.selected = num;
       return state;
     }
   });
 
-  var total$ = intent.get('out$').map(function (val) {
+  var setTotalFn$ = intent.get('out$').map(function (val) {
     return function (state) {
       state.total += val;
       return state;
@@ -77,40 +83,39 @@ var Model = Cycle.createModel(function (intent, initial) {
   return {
     ticker$: Rx.Observable.interval(1000).startWith(0),
     state$: Rx.Observable
-      .merge(total$, highlight$)
+      .merge(setTotalFn$, setSelectedFn$)
       .merge(initial.get('initial$'))
       .scan(function (state, f) {
         return f(state);
       })
-      .publish()
-      .refCount()
   };
 });
 
 var View = Cycle.createView(function (model) {
   return {
-    // model.get('ticker$').withLatestFrom(model.get('state$'), function (ticker, state) {
-    vtree$: model.get('ticker$').withLatestFrom(model.get('state$'), function (ticker, state) {
-      return h('div#the-view', ["Total: " + String(state.total),
-        [0, 1, 2, 3, 4].map(function (i) {
-          return h('ticker', {
-            attributes: {
-              ticker: ticker,
-              num: i,
-              highlight: i === parseInt(state.highlight, 10),
-            },
-            onhighlight: 'highlight$',
-            onout: 'out$',
-          });
-        })
-      ]);
+    vtree$: model.get('ticker$').withLatestFrom(model.get('state$'),
+      function (ticker, state) {
+        return h('div#the-view', [
+          "Total: " + String(state.total),
+          [0, 1, 2, 3, 4].map(function (i) {
+            return h('ticker', {
+              attributes: {
+                ticker: ticker,
+                num: i,
+                selected: i === parseInt(state.selected, 10),
+              },
+              onselected: 'selected$',
+              onout: 'out$',
+            });
+          }),
+        "Selected: " + state.selected]);
     })
   };
 });
 
 var Intent = Cycle.createIntent(function (view) {
   return {
-    highlight$: view.get('highlight$'),
+    selectTicker$: view.get('selected$'),
     out$: view.get('out$'),
   };
 });
