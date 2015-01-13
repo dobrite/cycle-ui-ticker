@@ -7,8 +7,7 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
     return {
       ticker$: attributes.get('ticker$'),
       out$: attributes.get('ticker$').map(function () { return 1; }),
-      // num$ not necessary, I guess, if its purpose was for highlighting
-      highlighted$: Rx.Observable // from internal intent, not from attributes
+      highlighted$: Rx.Observable
         .merge(
           intent.get('startHighlight$').map(function () { return true; }),
           intent.get('stopHighlight$').map(function () { return false; })
@@ -19,18 +18,25 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
 
   var TickerView = Cycle.createView(function (model) {
     return {
-      // Use combineLatest when you are confident that the combined observables
-      // are completely independent to each other. use withLatestFrom when you
-      // know one of the observables is derived from the other.
-      vtree$: model.get('ticker$').combineLatest(model.get('highlighted$'),
-        function (ticker, highlighted) {
+      vtree$: model.get('ticker$').combineLatest(
+        attributes.get('num$'),
+        attributes.get('selected$'),
+        model.get('highlighted$'),
+        function (ticker, num, selected, highlighted) {
           var color = (highlighted) ? 'red' : 'black';
+          var border = (selected) ? '1px solid black' : null;
           return h('div.ticker', [
             h('div', {
-              style: {color: color}, // style doesn't need to be inside attributes
+              attributes: {
+                'data-num': num
+              },
+              style: {
+                color: color,
+                border: border
+              },
               onmouseenter: 'mouseenter$',
               onmouseleave: 'mouseleave$',
-              // we use these two events to implement hover behavior
+              onclick: 'tickerClick$',
             }, String(ticker))
           ]);
         }
@@ -42,8 +48,6 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
     return {
       startHighlight$: view.get('mouseenter$'),
       stopHighlight$: view.get('mouseleave$')
-      // name intent events in such a way that they mean some user intention.
-      // Here, we interpret mouse entering as "the user wants to start highlighting", etc.
     };
   });
 
@@ -53,22 +57,23 @@ var TickerDataFlowNode = Cycle.createDataFlowNode(function (attributes) {
 
   return {
     vtree$: TickerView.get('vtree$'),
+    click$: TickerView.get('tickerClick$'),
     out$: TickerModel.get('out$')
   };
 });
 
 var Initial = Cycle.createDataFlowSource({
-  initial$: Rx.Observable.just({total: 0}),
+  initial$: Rx.Observable.just({ selected: 0, total: 0, }),
 });
 
 var Model = Cycle.createModel(function (intent, initial) {
-  // I removed highlighting state from here, it wasn't clear why did it have to
-  // leak out from the custom element ticker. Maybe you need it for game logic,
-  // but I think its natural to assume highlighting logic should be handled
-  // internally by the ticker.
+  var setSelectedFn$ = intent.get('selectTicker$').map(function (num) {
+    return function (state) {
+      state.selected = num;
+      return state;
+    }
+  });
 
-  // Since this is an observable emitting functions, rather name it as something
-  // like fn$, because total$ suggests it is an observable of numbers
   var setTotalFn$ = intent.get('out$').map(function (val) {
     return function (state) {
       state.total += val;
@@ -79,34 +84,40 @@ var Model = Cycle.createModel(function (intent, initial) {
   return {
     ticker$: Rx.Observable.interval(1000).startWith(0),
     state$: Rx.Observable
-      .merge(setTotalFn$)
+      .merge(setTotalFn$, setSelectedFn$)
       .merge(initial.get('initial$'))
       .scan(function (state, f) {
         return f(state);
       })
-      // publish refCount not needed. I think actually all exported observables
-      // from DataFlowNodes are already hot observables because they are all
-      // backed by Subjects.
   };
 });
 
 var View = Cycle.createView(function (model) {
   return {
-    vtree$: model.get('ticker$').withLatestFrom(model.get('state$'), function (ticker, state) {
-      return h('div#the-view', ["Total: " + String(state.total),
-        [0, 1, 2, 3, 4].map(function (i) {
-          return h('ticker', {attributes: {ticker: ticker}, onout: 'out$'});
-          // num and highlight not needed anymore here since highlighting is
-          // handled internally.
-        })
-      ]);
+    vtree$: model.get('ticker$').withLatestFrom(model.get('state$'),
+      function (ticker, state) {
+        return h('div#the-view', [
+          "Total: " + state.total,
+          [0, 1, 2, 3, 4].map(function (i) {
+            return h('ticker', {
+              attributes: {
+                ticker: ticker,
+                num: i,
+                selected: i === parseInt(state.selected, 10),
+              },
+              onclick: 'tickerClick$',
+              onout: 'out$',
+            });
+          }),
+        "Selected: " + state.selected]);
     })
   };
 });
 
 var Intent = Cycle.createIntent(function (view) {
   return {
-    out$: view.get('out$')
+    selectTicker$: view.get('tickerClick$').map(function (e) { return e.target.dataset.num; }),
+    out$: view.get('out$'),
   };
 });
 
